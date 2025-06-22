@@ -74,6 +74,53 @@ spec:
               image:
                 description: Image is the container image for the MCP server
                 type: string
+              ingress:
+                description: Ingress configuration for exposing the MCP server externally
+                properties:
+                  annotations:
+                    additionalProperties:
+                      type: string
+                    description: Annotations to add to the Ingress resource
+                    type: object
+                  enabled:
+                    default: true
+                    description: Enabled controls whether to create an Ingress resource
+                    type: boolean
+                  host:
+                    description: Host is the hostname for the Ingress rule
+                    type: string
+                  ingressClassName:
+                    description: IngressClassName is the name of the ingress class
+                      to use
+                    type: string
+                  path:
+                    default: /
+                    description: Path is the path for the Ingress rule
+                    type: string
+                  pathType:
+                    default: Prefix
+                    description: PathType specifies the interpretation of the Path
+                      matching
+                    enum:
+                    - Exact
+                    - Prefix
+                    - ImplementationSpecific
+                    type: string
+                  tls:
+                    description: TLS configuration for the Ingress
+                    properties:
+                      enabled:
+                        default: false
+                        description: Enabled controls whether to enable TLS
+                        type: boolean
+                      secretName:
+                        description: SecretName is the name of the secret containing
+                          the TLS certificate
+                        type: string
+                    type: object
+                required:
+                - host
+                type: object
               permissionProfile:
                 description: PermissionProfile defines the permission profile to use
                 properties:
