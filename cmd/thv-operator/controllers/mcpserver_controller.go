@@ -341,7 +341,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		newIngress := r.ingressForMCPServer(mcpServer)
 		if newIngress != nil {
 			ingress.Spec = newIngress.Spec
-			ingress.ObjectMeta.Annotations = newIngress.ObjectMeta.Annotations
+			ingress.Annotations = newIngress.Annotations
 			err = r.Update(ctx, ingress)
 			if err != nil {
 				ctxLogger.Error(err, "Failed to update Ingress", "Ingress.Namespace", ingress.Namespace, "Ingress.Name", ingress.Name)
@@ -837,77 +837,104 @@ func ingressNeedsUpdate(ingress *networkingv1.Ingress, mcpServer *mcpv1alpha1.MC
 		return false
 	}
 
-	// Check if the host has changed
-	if len(ingress.Spec.Rules) == 0 || ingress.Spec.Rules[0].Host != mcpServer.Spec.Ingress.Host {
-		return true
-	}
+	return ingressHostChanged(ingress, mcpServer) ||
+		ingressPathChanged(ingress, mcpServer) ||
+		ingressPathTypeChanged(ingress, mcpServer) ||
+		ingressBackendPortChanged(ingress, mcpServer) ||
+		ingressTLSChanged(ingress, mcpServer) ||
+		ingressClassChanged(ingress, mcpServer)
+}
 
-	// Check if the path has changed
+// ingressHostChanged checks if the ingress host has changed
+func ingressHostChanged(ingress *networkingv1.Ingress, mcpServer *mcpv1alpha1.MCPServer) bool {
+	return len(ingress.Spec.Rules) == 0 || ingress.Spec.Rules[0].Host != mcpServer.Spec.Ingress.Host
+}
+
+// ingressPathChanged checks if the ingress path has changed
+func ingressPathChanged(ingress *networkingv1.Ingress, mcpServer *mcpv1alpha1.MCPServer) bool {
 	expectedPath := mcpServer.Spec.Ingress.Path
 	if expectedPath == "" {
 		expectedPath = "/"
 	}
-	if len(ingress.Spec.Rules) > 0 &&
-		ingress.Spec.Rules[0].HTTP != nil &&
-		len(ingress.Spec.Rules[0].HTTP.Paths) > 0 &&
-		ingress.Spec.Rules[0].HTTP.Paths[0].Path != expectedPath {
+
+	if len(ingress.Spec.Rules) == 0 ||
+		ingress.Spec.Rules[0].HTTP == nil ||
+		len(ingress.Spec.Rules[0].HTTP.Paths) == 0 {
 		return true
 	}
 
-	// Check if the path type has changed
+	return ingress.Spec.Rules[0].HTTP.Paths[0].Path != expectedPath
+}
+
+// ingressPathTypeChanged checks if the ingress path type has changed
+func ingressPathTypeChanged(ingress *networkingv1.Ingress, mcpServer *mcpv1alpha1.MCPServer) bool {
 	expectedPathType := networkingv1.PathType(mcpServer.Spec.Ingress.PathType)
 	if mcpServer.Spec.Ingress.PathType == "" {
 		expectedPathType = networkingv1.PathTypePrefix
 	}
-	if len(ingress.Spec.Rules) > 0 &&
-		ingress.Spec.Rules[0].HTTP != nil &&
-		len(ingress.Spec.Rules[0].HTTP.Paths) > 0 &&
-		ingress.Spec.Rules[0].HTTP.Paths[0].PathType != nil &&
-		*ingress.Spec.Rules[0].HTTP.Paths[0].PathType != expectedPathType {
+
+	if len(ingress.Spec.Rules) == 0 ||
+		ingress.Spec.Rules[0].HTTP == nil ||
+		len(ingress.Spec.Rules[0].HTTP.Paths) == 0 ||
+		ingress.Spec.Rules[0].HTTP.Paths[0].PathType == nil {
 		return true
 	}
 
-	// Check if the backend service port has changed
-	if len(ingress.Spec.Rules) > 0 &&
-		ingress.Spec.Rules[0].HTTP != nil &&
-		len(ingress.Spec.Rules[0].HTTP.Paths) > 0 &&
-		ingress.Spec.Rules[0].HTTP.Paths[0].Backend.Service != nil &&
-		ingress.Spec.Rules[0].HTTP.Paths[0].Backend.Service.Port.Number != mcpServer.Spec.Port {
+	return *ingress.Spec.Rules[0].HTTP.Paths[0].PathType != expectedPathType
+}
+
+// ingressBackendPortChanged checks if the ingress backend service port has changed
+func ingressBackendPortChanged(ingress *networkingv1.Ingress, mcpServer *mcpv1alpha1.MCPServer) bool {
+	if len(ingress.Spec.Rules) == 0 ||
+		ingress.Spec.Rules[0].HTTP == nil ||
+		len(ingress.Spec.Rules[0].HTTP.Paths) == 0 ||
+		ingress.Spec.Rules[0].HTTP.Paths[0].Backend.Service == nil {
 		return true
 	}
 
-	// Check if TLS configuration has changed
+	return ingress.Spec.Rules[0].HTTP.Paths[0].Backend.Service.Port.Number != mcpServer.Spec.Port
+}
+
+// ingressTLSChanged checks if the ingress TLS configuration has changed
+func ingressTLSChanged(ingress *networkingv1.Ingress, mcpServer *mcpv1alpha1.MCPServer) bool {
 	tlsEnabled := mcpServer.Spec.Ingress.TLS != nil && mcpServer.Spec.Ingress.TLS.Enabled
+
 	if tlsEnabled {
-		if len(ingress.Spec.TLS) == 0 {
-			return true
-		}
-		// Check if TLS secret name has changed
-		if mcpServer.Spec.Ingress.TLS.SecretName != "" &&
-			ingress.Spec.TLS[0].SecretName != mcpServer.Spec.Ingress.TLS.SecretName {
-			return true
-		}
-		// Check if TLS hosts have changed
-		if len(ingress.Spec.TLS[0].Hosts) == 0 ||
-			ingress.Spec.TLS[0].Hosts[0] != mcpServer.Spec.Ingress.Host {
-			return true
-		}
-	} else if len(ingress.Spec.TLS) > 0 {
-		// TLS was disabled but ingress still has TLS config
+		return ingressTLSEnabledChanged(ingress, mcpServer)
+	}
+
+	// TLS was disabled but ingress still has TLS config
+	return len(ingress.Spec.TLS) > 0
+}
+
+// ingressTLSEnabledChanged checks TLS configuration when TLS is enabled
+func ingressTLSEnabledChanged(ingress *networkingv1.Ingress, mcpServer *mcpv1alpha1.MCPServer) bool {
+	if len(ingress.Spec.TLS) == 0 {
 		return true
 	}
 
-	// Check if IngressClassName has changed
+	// Check if TLS secret name has changed
+	if mcpServer.Spec.Ingress.TLS.SecretName != "" &&
+		ingress.Spec.TLS[0].SecretName != mcpServer.Spec.Ingress.TLS.SecretName {
+		return true
+	}
+
+	// Check if TLS hosts have changed
+	return len(ingress.Spec.TLS[0].Hosts) == 0 ||
+		ingress.Spec.TLS[0].Hosts[0] != mcpServer.Spec.Ingress.Host
+}
+
+// ingressClassChanged checks if the ingress class has changed
+func ingressClassChanged(ingress *networkingv1.Ingress, mcpServer *mcpv1alpha1.MCPServer) bool {
+	// Check if IngressClassName pointer status has changed
 	if (mcpServer.Spec.Ingress.IngressClassName == nil) != (ingress.Spec.IngressClassName == nil) {
 		return true
 	}
-	if mcpServer.Spec.Ingress.IngressClassName != nil &&
-		ingress.Spec.IngressClassName != nil &&
-		*mcpServer.Spec.Ingress.IngressClassName != *ingress.Spec.IngressClassName {
-		return true
-	}
 
-	return false
+	// Check if IngressClassName values have changed
+	return mcpServer.Spec.Ingress.IngressClassName != nil &&
+		ingress.Spec.IngressClassName != nil &&
+		*mcpServer.Spec.Ingress.IngressClassName != *ingress.Spec.IngressClassName
 }
 
 // resourceRequirementsForMCPServer returns the resource requirements for the MCPServer
