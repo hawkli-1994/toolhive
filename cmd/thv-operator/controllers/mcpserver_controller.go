@@ -442,7 +442,7 @@ func (r *MCPServerReconciler) serviceForMCPServer(m *mcpv1alpha1.MCPServer) *cor
 			},
 		},
 		Spec: corev1.ServiceSpec{
-			Type:     corev1.ServiceTypeLoadBalancer,
+			Type:     corev1.ServiceTypeClusterIP,
 			Selector: ls,
 			Ports: []corev1.ServicePort{{
 				Port:       m.Spec.Port,

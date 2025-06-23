@@ -798,7 +798,7 @@ func (c *Client) createHeadlessService(
 	}
 
 	// Create service type based on whether we have node ports
-	serviceType := corev1.ServiceTypeLoadBalancer
+	serviceType := corev1.ServiceTypeClusterIP
 	for _, sp := range servicePorts {
 		if sp.NodePort != nil {
 			serviceType = corev1.ServiceTypeNodePort
