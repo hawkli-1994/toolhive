@@ -24,6 +24,7 @@ import (
 
 	mcpv1alpha1 "github.com/stacklok/toolhive/cmd/thv-operator/api/v1alpha1"
 	"github.com/stacklok/toolhive/pkg/logger"
+	networkingv1 "k8s.io/api/networking/v1"
 )
 
 // MCPServerReconciler reconciles a MCPServer object
@@ -57,6 +58,9 @@ type MCPServerReconciler struct {
 
 // Allow the operator to manage StatefulSets
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=create;delete;get;list;patch;update;watch
+
+// Allow the operator to manage Ingresses
+// +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=create;delete;get;list;patch;update;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -208,14 +212,32 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		ctxLogger.Error(err, "Failed to get Service")
 		return ctrl.Result{}, err
 	}
+	ingress := &networkingv1.Ingress{}
+	err = r.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: mcpServer.Namespace}, ingress)
+	if err != nil && errors.IsNotFound(err) {
+		// Define a new ingress
+		ing := r.ingressForService(service)
+		if ing == nil {
+			ctxLogger.Error(nil, "Failed to create Ingress object")
+			return ctrl.Result{}, fmt.Errorf("failed to create Ingress object")
+		}
+		ctxLogger.Info("Creating a new Ingress", "Ingress.Namespace", ing.Namespace, "Ingress.Name", ing.Name)
+		err = r.Create(ctx, ing)
+		if err != nil {
+			ctxLogger.Error(err, "Failed to create new Ingress", "Ingress.Namespace", ing.Namespace, "Ingress.Name", ing.Name)
+			return ctrl.Result{}, err
+		}
+		// Ingress created successfully - return and requeue
+		return ctrl.Result{Requeue: true}, nil
+	} else if err != nil {
+		ctxLogger.Error(err, "Failed to get Ingress")
+		return ctrl.Result{}, err
+	}
 
 	var expectURL string
-	schema := "http"
-	if service != nil && len(service.Status.LoadBalancer.Ingress) > 0 && service.Status.LoadBalancer.Ingress[0].IP != "" {
-		expectURL = fmt.Sprintf("%s://%s:%d/sse", schema, service.Status.LoadBalancer.Ingress[0].IP, mcpServer.Spec.Port)
-	} else {
-		expectURL = ""
-	}
+	schema := "https"
+	// url is the ingress url
+	expectURL = fmt.Sprintf("%s://%s/sse", schema, ingress.Spec.Rules[0].Host)
 	// Update the MCPServer status with the service URL
 	if mcpServer.Status.URL == "" || mcpServer.Status.URL != expectURL {
 		mcpServer.Status.URL = expectURL
@@ -252,11 +274,98 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			ctxLogger.Error(err, "Failed to update Service", "Service.Namespace", service.Namespace, "Service.Name", service.Name)
 			return ctrl.Result{}, err
 		}
-		// Spec updated - return and requeue
+		oldIngress := &networkingv1.Ingress{}
+		err = r.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: mcpServer.Namespace}, oldIngress)
+		if err != nil {
+			if !errors.IsNotFound(err) {
+				ctxLogger.Error(err, "Failed to get Ingress", "Ingress.Namespace", ingress.Namespace, "Ingress.Name", ingress.Name)
+				return ctrl.Result{}, err
+			}
+		}
+		newIngress := r.ingressForService(service)
+		if oldIngress != nil {
+			oldIngress.Spec = newIngress.Spec
+			err = r.Update(ctx, oldIngress)
+			if err != nil {
+				ctxLogger.Error(err, "Failed to update Ingress", "Ingress.Namespace", oldIngress.Namespace, "Ingress.Name", oldIngress.Name)
+				return ctrl.Result{}, err
+			}
+		} else {
+			err = r.Create(ctx, newIngress)
+			if err != nil {
+				ctxLogger.Error(err, "Failed to create Ingress", "Ingress.Namespace", newIngress.Namespace, "Ingress.Name", newIngress.Name)
+				return ctrl.Result{}, err
+			}
+		}
 		return ctrl.Result{Requeue: true}, nil
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// apiVersion: networking.k8s.io/v1
+// kind: Ingress
+// metadata:
+//   name: mcp-wiki-ingress
+//   namespace: toolhive-system
+//   annotations:
+//     traefik.ingress.kubernetes.io/connection-headers: "keep-alive"
+//     alb.ingress.kubernetes.io/backend-keep-alive-timeout: "600"
+//     #traefik.ingress.kubernetes.io/router.middlewares: toolhive-system-wiki-prefix-stripper@kubernetescrd
+// spec:
+//   ingressClassName: traefik
+//   rules:
+//   - host: wiki.mcpforge.xyz
+//     http:
+//       paths:
+//       - path: /
+//         pathType: Prefix
+//         backend:
+//           service:
+//             name: mcp-wiki-proxy
+//             port:
+//               number: 8080
+
+func (r *MCPServerReconciler) ingressForService(service *corev1.Service, ) *networkingv1.Ingress {
+	defaultDomain := "mcpforge.xyz"
+	ingressClassName := "traefik"
+	ingress := &networkingv1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      service.Name,
+			Namespace: service.Namespace,
+			Annotations: map[string]string{
+				"traefik.ingress.kubernetes.io/connection-headers":     "keep-alive",
+				"alb.ingress.kubernetes.io/backend-keep-alive-timeout": "600",
+			},
+		},
+		Spec: networkingv1.IngressSpec{
+			IngressClassName: &ingressClassName,
+			Rules: []networkingv1.IngressRule{
+				{
+					Host: fmt.Sprintf("%s.%s", service.Name, defaultDomain),
+					IngressRuleValue: networkingv1.IngressRuleValue{
+						HTTP: &networkingv1.HTTPIngressRuleValue{
+							Paths: []networkingv1.HTTPIngressPath{
+								{
+									Path:     "/",
+									PathType: (*networkingv1.PathType)(&[]networkingv1.PathType{networkingv1.PathTypePrefix}[0]),
+									Backend: networkingv1.IngressBackend{
+										Service: &networkingv1.IngressServiceBackend{
+											Name: service.Name,
+											Port: networkingv1.ServiceBackendPort{
+												Number: service.Spec.Ports[0].Port,
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	return ingress
 }
 
 // deploymentForMCPServer returns a MCPServer Deployment object
@@ -720,5 +829,6 @@ func (r *MCPServerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&mcpv1alpha1.MCPServer{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
+		Owns(&networkingv1.Ingress{}).
 		Complete(r)
 }
