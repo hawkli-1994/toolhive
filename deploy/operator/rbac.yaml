@@ -72,6 +72,34 @@ rules:
   - update
   - watch
 
+# Allow the operator to manage Ingresses
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - ingresses
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+
+# Allow the operator to manage StatefulSets
+- apiGroups:
+  - apps
+  resources:
+  - statefulsets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+
 # Allow the operator to manage Pods
 - apiGroups:
   - ""
