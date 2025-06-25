@@ -11,6 +11,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -24,7 +25,6 @@ import (
 
 	mcpv1alpha1 "github.com/stacklok/toolhive/cmd/thv-operator/api/v1alpha1"
 	"github.com/stacklok/toolhive/pkg/logger"
-	networkingv1 "k8s.io/api/networking/v1"
 )
 
 // MCPServerReconciler reconciles a MCPServer object
@@ -326,7 +326,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 //             port:
 //               number: 8080
 
-func (r *MCPServerReconciler) ingressForService(service *corev1.Service) *networkingv1.Ingress {
+func (_ *MCPServerReconciler) ingressForService(service *corev1.Service) *networkingv1.Ingress {
 	defaultDomain := "mcpforge.xyz"
 	ingressClassName := "traefik"
 	ingress := &networkingv1.Ingress{
