@@ -216,7 +216,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	err = r.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: mcpServer.Namespace}, ingress)
 	if err != nil && errors.IsNotFound(err) {
 		// Define a new ingress
-		ing := r.ingressForService(service)
+		ing := ingressForService(service)
 		if ing == nil {
 			ctxLogger.Error(nil, "Failed to create Ingress object")
 			return ctrl.Result{}, fmt.Errorf("failed to create Ingress object")
@@ -282,7 +282,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 				return ctrl.Result{}, err
 			}
 		}
-		newIngress := r.ingressForService(service)
+		newIngress := ingressForService(service)
 		if err == nil {
 			oldIngress.Spec = newIngress.Spec
 			err = r.Update(ctx, oldIngress)
@@ -326,7 +326,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 //             port:
 //               number: 8080
 
-func (_ *MCPServerReconciler) ingressForService(service *corev1.Service) *networkingv1.Ingress {
+func ingressForService(service *corev1.Service) *networkingv1.Ingress {
 	defaultDomain := "mcpforge.xyz"
 	ingressClassName := "traefik"
 	ingress := &networkingv1.Ingress{
