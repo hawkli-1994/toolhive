@@ -423,6 +423,11 @@ func (r *MCPServerReconciler) deploymentForMCPServer(m *mcpv1alpha1.MCPServer) *
 			Value: e.Value,
 		})
 	}
+	if len(env) > 0 {
+		for _, e := range env {
+			args = append(args, fmt.Sprintf("--env=%s=%s", e.Name, e.Value))
+		}
+	}
 
 	// Prepare container volume mounts
 	volumeMounts := []corev1.VolumeMount{}
